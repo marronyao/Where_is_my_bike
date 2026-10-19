@@ -4,6 +4,25 @@ const colours = ['#24624c','#b35937','#3c65a0','#885698','#94701c'];
 const $ = id => document.getElementById(id);
 let bikes = [], selected = null, editing = null, map, markers, draftMarker, locating = 0;
 const say = message => { $('status').textContent = message; };
+const API = window.BIKE_API || '';
+let account = null, revision = 0, saving = false, restoring = false;
+let authMode = 'login';
+let token = '';
+try { token = sessionStorage.getItem('bike-session') || ''; } catch {}
+async function request(path, options = {}, bearer = token) {
+  if (!API) throw Error('Cloud accounts are not configured yet. Please try again later.');
+  const response = await fetch(API + path, {...options, headers: {'Content-Type':'application/json', ...(bearer ? {Authorization:'Bearer '+bearer} : {})}, cache:'no-store'});
+  const data = await response.json();
+  if (!response.ok) throw Error(data.error || 'Could not contact the cloud service.');
+  return data;
+}
+function accountUI() {
+  $('account-label').textContent = account ? account.username + ' · CLOUD' : 'ON THIS DEVICE';
+  $('login').hidden = $('signup').hidden = !!account;
+  $('logout').hidden = $('refresh-cloud').hidden = !account;
+  $('storage-heading').textContent = account ? 'Saved to your account.' : 'Your locations stay with you.';
+  $('storage-description').textContent = account ? 'Changes are saved to the cloud. Local bikes remain separate. Export backups for safekeeping.' : 'Saved in this browser, on this device. Log in to access your account’s bikes on another device.';
+}
 function validate(data) {
   if (!Array.isArray(data) || data.length > 100) throw Error('Invalid backup: expected up to 100 bikes.');
   const ids = new Set();
@@ -20,7 +39,14 @@ function validate(data) {
   });
 }
 try { bikes = validate(JSON.parse(localStorage.getItem(KEY) || '[]')); } catch { say('Saved data could not be read. Export a backup before making changes.'); }
-function commit(next) {
+async function commit(next) {
+  if (saving || restoring) { say('Please wait for the current request to finish.'); return false; }
+  if (account) {
+    saving = true;
+    try { const result = await request('/bikes', {method:'PUT', body:JSON.stringify({bikes:next, revision})}); revision=result.revision; bikes=next; return true; }
+    catch (error) { say(error.message + ' Your changes have not been saved.'); return false; }
+    finally { saving=false; }
+  }
   try { localStorage.setItem(KEY,JSON.stringify(next)); bikes=next; return true; }
   catch { say('Could not save. Browser storage may be full or unavailable. Your changes have not been saved.'); return false; }
 }
@@ -38,7 +64,7 @@ function render() {
     select.onclick=()=>choose(b.id); card.append(select);
     if(b.parking?.note) card.append(el('p',b.parking.note));
     const tools=el('div','','tools'); const edit=el('button','Edit','text'), remove=el('button','Delete','text');
-    edit.onclick=()=>openBike(b); remove.onclick=()=>{if(confirm('Delete '+b.name+' and its saved parking spot?')){if(commit(bikes.filter(x=>x.id!==b.id))) choose(selected===b.id?(bikes[0]?.id||null):selected);}};
+    edit.onclick=()=>openBike(b); remove.onclick=async()=>{if(confirm('Delete '+b.name+' and its saved parking spot?')){if(await commit(bikes.filter(x=>x.id!==b.id))) choose(selected===b.id?(bikes[0]?.id||null):selected);}};
     tools.append(edit,remove); card.append(tools); $('bikes').append(card);
   });
   if(markers){markers.clearLayers();bikes.filter(b=>b.parking).forEach(b=>{const p=b.parking;const m=L.marker([p.lat,p.lng],{icon:pin(b.colour)}).addTo(markers);m.bindTooltip(b.name);m.on('click',()=>choose(b.id));});}
@@ -63,8 +89,8 @@ function draft(lat,lng) {
 }
 function openBike(b=null){editing=b?.id||null;$('dialog-title').textContent=b?'Edit bike':'Add a bike';$('bike-name').value=b?.name||'';$('bike-details').value=b?.details||'';$('bike-colour').value=b?.colour||colours[bikes.length%colours.length];$('bike-dialog').showModal();}
 $('add').onclick=()=>openBike();$('close-dialog').onclick=()=>$('bike-dialog').close();
-$('bike-form').onsubmit=e=>{e.preventDefault();const name=$('bike-name').value.trim();if(!name){$('bike-name').focus();return;}const old=bikes.find(b=>b.id===editing);const b={id:editing||crypto.randomUUID(),name,details:$('bike-details').value.trim(),colour:$('bike-colour').value,parking:old?.parking||null};if(commit(editing?bikes.map(x=>x.id===editing?b:x):[...bikes,b])){$('bike-dialog').close();choose(b.id);say('Bike saved.');}};
-$('parking-form').onsubmit=e=>{e.preventDefault();const b=current();if(!b)return;const lat=Number($('lat').value),lng=Number($('lng').value);if(!Number.isFinite(lat)||Math.abs(lat)>90||!Number.isFinite(lng)||Math.abs(lng)>180)return;const parking={lat,lng,note:$('note').value.trim(),time:new Date().toISOString()};if(commit(bikes.map(x=>x.id===b.id?{...x,parking}:x))){choose(b.id);say('Parking spot saved on this device.');}};
+$('bike-form').onsubmit=async e=>{e.preventDefault();const name=$('bike-name').value.trim();if(!name){$('bike-name').focus();return;}const old=bikes.find(b=>b.id===editing);const b={id:editing||crypto.randomUUID(),name,details:$('bike-details').value.trim(),colour:$('bike-colour').value,parking:old?.parking||null};if(await commit(editing?bikes.map(x=>x.id===editing?b:x):[...bikes,b])){$('bike-dialog').close();choose(b.id);say('Bike saved'+(account?' to your account.':' on this device.'));}};
+$('parking-form').onsubmit=async e=>{e.preventDefault();const b=current();if(!b)return;const lat=Number($('lat').value),lng=Number($('lng').value);if(!Number.isFinite(lat)||Math.abs(lat)>90||!Number.isFinite(lng)||Math.abs(lng)>180)return;const parking={lat,lng,note:$('note').value.trim(),time:new Date().toISOString()};if(await commit(bikes.map(x=>x.id===b.id?{...x,parking}:x))){choose(b.id);say('Parking spot saved'+(account?' to your account.':' on this device.'));}};
 $('cancel').onclick=()=>{choose(selected);say('Unsaved changes discarded.');};
 ['lat','lng'].forEach(id=>$(id).addEventListener('change',()=>{if($('lat').value!==''&&$('lng').value!==''&&$('lat').checkValidity()&&$('lng').checkValidity())draft(Number($('lat').value),Number($('lng').value));}));
 $('locate').onclick=()=>{
@@ -74,7 +100,7 @@ $('locate').onclick=()=>{
 };
 $('fit').onclick=()=>{const points=bikes.filter(b=>b.parking).map(b=>[b.parking.lat,b.parking.lng]);if(map&&points.length)map.fitBounds(points,{padding:[40,40],maxZoom:16});else say('Save a parking spot to show it here.');};
 $('export').onclick=()=>{const blob=new Blob([JSON.stringify({version:1,bikes},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=el('a','');a.href=url;a.download='my-bikes-private-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);say('Backup exported. It contains private location data; store it safely.');};
-$('import').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>1000000)throw Error('Backup is too large.');const data=JSON.parse(await file.text());if(data.version!==1)throw Error('Unsupported backup version.');const next=validate(data.bikes);if(confirm('Replace all bikes on this device with '+next.length+' bikes from this backup?')&&commit(next)){choose(bikes[0]?.id||null);say('Backup restored.');}}catch(err){say('Could not import: '+err.message);}e.target.value='';};
+$('import').onchange=async e=>{const file=e.target.files[0];if(!file)return;const target=account?.id||null;try{if(file.size>1000000)throw Error('Backup is too large.');const data=JSON.parse(await file.text());if(target!==(account?.id||null))throw Error('Account changed. Select the backup again.');if(data.version!==1)throw Error('Unsupported backup version.');const next=validate(data.bikes);if(confirm('Replace all bikes '+(account?'in your cloud account (including uploading exact locations)':'on this device')+' with '+next.length+' bikes from this backup?')&&await commit(next)){choose(bikes[0]?.id||null);say('Backup restored.');}}catch(err){say('Could not import: '+err.message);}e.target.value='';};
 $('privacy').onclick=()=>$('privacy-dialog').showModal();$('close-privacy').onclick=()=>$('privacy-dialog').close();
 const isLocalFile = location.protocol === 'file:';
 if (isLocalFile) {
@@ -97,4 +123,52 @@ if(typeof L!=='undefined' && !isLocalFile){
   markers=L.layerGroup().addTo(map);map.on('click',e=>{if(!current())return;draft(e.latlng.lat,((e.latlng.lng+180)%360+360)%360-180);say('Spot selected. Save to confirm.');});
 }else if (!isLocalFile) $('map-fallback').textContent='Map unavailable. Check your connection, or enter coordinates below.';
 choose(bikes[0]?.id||null);
+function openAuth(mode) {
+  if(saving||restoring){say('Please wait for the current request to finish.');return;}
+  authMode=mode; const signup=mode==='signup';
+  $('auth-title').textContent=$('auth-submit').textContent=signup?'Sign up':'Log in';
+  $('password').value=''; $('password').autocomplete=signup?'new-password':'current-password';
+  $('auth-help').textContent=signup?'At least 8 characters. No required capitals, numbers or symbols. Usernames are case-insensitive. No password recovery is available, so keep your password safe.':'Use your username and password.';
+  $('auth-error').textContent=''; $('auth-dialog').showModal();
+}
+$('login').onclick=()=>openAuth('login'); $('signup').onclick=()=>openAuth('signup');
+$('auth-cancel').onclick=()=>$('auth-dialog').close();
+$('auth-form').onsubmit=async e=>{
+  e.preventDefault();if(saving||restoring)return;
+  const password=$('password').value;
+  if(authMode==='signup'&&Array.from(password).length<8){$('auth-error').textContent='Password must contain at least 8 characters.';return;}
+  restoring=true;$('auth-submit').disabled=true;$('auth-cancel').disabled=true;
+  try {
+    const result=await request('/'+authMode,{method:'POST',body:JSON.stringify({username:$('username').value,password})},'');
+    try {
+      const doc=await request('/bikes',{},result.token),next=validate(doc.bikes);
+      token=result.token;account=doc.user;revision=doc.revision;bikes=next;
+      try{sessionStorage.setItem('bike-session',token);}catch{}
+      $('auth-dialog').close();accountUI();choose(bikes[0]?.id||null);say('Logged in. You are viewing your cloud bikes.');
+    }catch(error){await request('/logout',{method:'POST'},result.token).catch(()=>{});throw error;}
+  }catch(error){$('auth-error').textContent=error.message;}
+  finally{restoring=false;$('auth-submit').disabled=false;$('auth-cancel').disabled=false;$('password').value='';}
+};
+$('auth-dialog').addEventListener('cancel',e=>{if(restoring)e.preventDefault();});
+function localMode(){token='';account=null;revision=0;try{sessionStorage.removeItem('bike-session');}catch{}try{bikes=validate(JSON.parse(localStorage.getItem(KEY)||'[]'));}catch{bikes=[];say('Local records could not be read.');}accountUI();choose(bikes[0]?.id||null);}
+$('logout').onclick=async()=>{
+  if(saving||restoring){say('Please wait for the current request to finish.');return;}
+  restoring=true;
+  try{await request('/logout',{method:'POST'});localMode();say('Logged out. Local mode restored.');}
+  catch(error){say('Could not log out: '+error.message+' Please try again.');}
+  finally{restoring=false;}
+};
+$('refresh-cloud').onclick=async()=>{
+  if(saving||restoring)return;
+  if(!confirm('Reload saved cloud bikes? Unsaved form changes will be discarded.'))return;
+  restoring=true;
+  try{const doc=await request('/bikes');bikes=validate(doc.bikes);revision=doc.revision;choose(bikes[0]?.id||null);say('Cloud bikes reloaded.');}
+  catch(error){say(error.message);}
+  finally{restoring=false;}
+};
+accountUI();
+if(token){
+  restoring=true;say('Restoring your cloud session…');
+  request('/bikes').then(doc=>{bikes=validate(doc.bikes);account=doc.user;revision=doc.revision;accountUI();choose(bikes[0]?.id||null);say('Cloud session restored.');}).catch(error=>{localMode();say('Could not restore cloud session: '+error.message+' Log in again to access cloud bikes.');}).finally(()=>{restoring=false;});
+}
 if(!isLocalFile && 'serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>say('Offline setup is unavailable. You can still use the app online.'));
