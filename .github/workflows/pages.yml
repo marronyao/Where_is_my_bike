@@ -21,7 +21,7 @@ jobs:
       - name: Stage public files only
         run: |
           mkdir _site
-          cp index.html style.css app.js config.js sw.js manifest.webmanifest icon.svg _site/
+          cp index.html style.css app.js config.js sw.js manifest.webmanifest icon.svg apple-touch-icon.png favicon-32.png favicon.ico icon-192.png icon-512.png _site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,5 +1,5 @@
-const CACHE='my-bikes-shell-v3';
-const SHELL=['./','./index.html','./style.css','./app.js','./config.js','./icon.svg','./manifest.webmanifest'];
+const CACHE='my-bikes-shell-v4';
+const SHELL=['./','./index.html','./style.css','./app.js','./config.js','./icon.svg','./apple-touch-icon.png','./favicon-32.png','./favicon.ico','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL))));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('my-bikes-shell-')&&k!==CACHE).map(k=>caches.delete(k))))));
 // Only cache this app's static shell. Never intercept map tiles or private data.
