@@ -13,7 +13,7 @@ async function request(path, options = {}, bearer = token) {
   if (!API) throw Error('Cloud accounts are not configured yet. Please try again later.');
   const response = await fetch(API + path, {...options, headers: {'Content-Type':'application/json', ...(bearer ? {Authorization:'Bearer '+bearer} : {})}, cache:'no-store'});
   const data = await response.json();
-  if (!response.ok) throw Error(data.error || 'Could not contact the cloud service.');
+  if (!response.ok) throw Object.assign(Error(data.error || 'Could not contact the cloud service.'), {status:response.status});
   return data;
 }
 function accountUI() {
@@ -155,7 +155,7 @@ $('logout').onclick=async()=>{
   if(saving||restoring){say('Please wait for the current request to finish.');return;}
   restoring=true;
   try{await request('/logout',{method:'POST'});localMode();say('Logged out. Local mode restored.');}
-  catch(error){say('Could not log out: '+error.message+' Please try again.');}
+  catch(error){if(error.status===401){localMode();say('Session ended. Local mode restored.');}else say('Could not log out: '+error.message+' Please try again.');}
   finally{restoring=false;}
 };
 $('refresh-cloud').onclick=async()=>{
