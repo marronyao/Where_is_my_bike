@@ -1,4 +1,5 @@
 const encoder = new TextEncoder();
+const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const hex = bytes => [...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join('');
 const random = size => hex(crypto.getRandomValues(new Uint8Array(size)));
 const digest = value => crypto.subtle.digest('SHA-256', encoder.encode(value)).then(hex);
@@ -54,13 +55,15 @@ export default {async fetch(request,env){
         if(!user||!equal(hash,user.password_hash))fail('Incorrect username or password.',401);
       }
       const token=random(32);
-      await db.batch([db.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(now),db.prepare('DELETE FROM auth_limits WHERE expires_at<=?').bind(now),db.prepare('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES (?,?,?)').bind(await digest(token),user.id,now+604800)]);
+      await db.batch([db.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(now),db.prepare('DELETE FROM auth_limits WHERE expires_at<=?').bind(now),db.prepare('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES (?,?,?)').bind(await digest(token),user.id,now+SESSION_SECONDS)]);
       return reply({token,user:{id:user.id,username:user.display_name}});
     }
     const token=request.headers.get('Authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];if(!token)fail('Please log in.',401);
     const hash=await digest(token),user=await db.prepare('SELECT u.id,u.display_name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?').bind(hash,now).first();
     if(!user)fail('Your session has expired. Please log in again.',401);
     if(path==='/logout'&&request.method==='POST'){await db.prepare('DELETE FROM sessions WHERE token_hash=?').bind(hash).run();return reply({ok:true});}
+    // Renew active sessions at most once a day; revoked sessions are never recreated.
+    if(path==='/bikes')await db.prepare('UPDATE sessions SET expires_at=? WHERE token_hash=? AND expires_at>? AND expires_at<?').bind(now+SESSION_SECONDS,hash,now,now+SESSION_SECONDS-86400).run();
     if(path==='/bikes'&&request.method==='GET'){
       const doc=await db.prepare('SELECT bikes,revision FROM bike_documents WHERE user_id=?').bind(user.id).first();return reply({bikes:JSON.parse(doc.bikes),revision:doc.revision,user:{id:user.id,username:user.display_name}});
     }

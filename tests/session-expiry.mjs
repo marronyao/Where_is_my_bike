@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFile} from 'node:fs/promises';
+import worker from '../backend/worker.mjs';
+const db=new DatabaseSync(':memory:');db.exec(await readFile(new URL('../backend/schema.sql',import.meta.url),'utf8'));
+const now=Math.floor(Date.now()/1000),token='a'.repeat(64);
+const hash=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token))).toString('hex');
+db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?)').run('u','test','Test','salt','hash',now);
+db.prepare('INSERT INTO bike_documents(user_id) VALUES (?)').run('u');
+db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(hash,'u',now+86400);
+const env={ALLOWED_ORIGIN:'https://marronyao.github.io',DB:{prepare(sql){return {bind(...params){return {first:async()=>db.prepare(sql).get(...params),run:async()=>db.prepare(sql).run(...params)};}};}}};
+const get=()=>worker.fetch(new Request('https://test.example/bikes',{headers:{Authorization:'Bearer '+token}}),env);
+assert.equal((await get()).status,200);const renewed=db.prepare('SELECT expires_at FROM sessions').get().expires_at;assert(Math.abs(renewed-(now+30*86400))<5);
+assert.equal((await get()).status,200);assert.equal(db.prepare('SELECT expires_at FROM sessions').get().expires_at,renewed);
+db.prepare('UPDATE sessions SET expires_at=?').run(now-1);assert.equal((await get()).status,401);assert.equal(db.prepare('SELECT expires_at FROM sessions').get().expires_at,now-1);
+db.exec('DELETE FROM sessions');assert.equal((await get()).status,401);assert.equal(db.prepare('SELECT count(*) AS n FROM sessions').get().n,0);
+db.close();console.log('PASS: rolling 30-day renewal, daily write limit, expired and revoked sessions cannot renew.');

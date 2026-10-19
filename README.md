@@ -28,9 +28,11 @@ Before switching from file:// to localhost or Pages, export any existing bike re
 
 ## Cloud accounts
 
+Logins are remembered in the same browser. Existing tab sessions migrate automatically when possible. Temporary network failures preserve login credentials for retry; expired/revoked sessions are cleared after a server 401. Logout is reflected in other open tabs. Clearing browser site data or using private browsing can remove the remembered login.
+
 Sign up with a username and a password of at least 8 Unicode characters. There are no character-composition requirements. Usernames are trimmed, case-insensitive and limited to 80 characters. Passwords are not trimmed. There is currently no password reset/recovery, so keep your password safe.
 
-The Workers API stores salted PBKDF2-SHA256 password hashes (100,000 iterations, compatible with Workers Web Crypto), hashes opaque 256-bit session tokens before storage, expires sessions after seven days, revokes the current session on logout, rate-limits authentication by IP and username, and validates all incoming bike records. Browser session tokens use sessionStorage; cloud bike records stay in memory, rather than localStorage. The service worker caches public shell files only. The browser has no Cloudflare API token or database credentials.
+The Workers API stores salted PBKDF2-SHA256 password hashes (100,000 iterations, compatible with Workers Web Crypto), hashes opaque 256-bit session tokens before storage, expires sessions after 30 days of inactivity (renewed at most once a day), revokes the current session on logout, rate-limits authentication by IP and username, and validates all incoming bike records. Browser session tokens use localStorage, so closing and reopening the browser preserves login; logout clears both persistent and legacy tab storage; cloud bike records stay in memory, rather than localStorage. The service worker caches public shell files only. The browser has no Cloudflare API token or database credentials.
 
 Cloud records belong to the authenticated user. Updates use a revision check; a stale device must reload cloud data rather than silently overwrite newer data. Offline cloud edits are not queued: failed saves leave the saved state unchanged and display an error. Local mode is separate and remains usable without login. Export local data before logging in, then explicitly import into the cloud account if desired. Import replaces the account document after confirmation and uploads exact coordinates.
 

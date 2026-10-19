@@ -8,7 +8,10 @@ const API = window.BIKE_API || '';
 let account = null, revision = 0, saving = false, restoring = false;
 let authMode = 'login';
 let token = '';
-try { token = sessionStorage.getItem('bike-session') || ''; } catch {}
+try {
+  token = localStorage.getItem('bike-session') || sessionStorage.getItem('bike-session') || '';
+  if (token) { localStorage.setItem('bike-session', token); sessionStorage.removeItem('bike-session'); }
+} catch {}
 async function request(path, options = {}, bearer = token) {
   if (!API) throw Error('Cloud accounts are not configured yet. Please try again later.');
   const response = await fetch(API + path, {...options, headers: {'Content-Type':'application/json', ...(bearer ? {Authorization:'Bearer '+bearer} : {})}, cache:'no-store'});
@@ -43,7 +46,8 @@ async function commit(next) {
   if (saving || restoring) { say('Please wait for the current request to finish.'); return false; }
   if (account) {
     saving = true;
-    try { const result = await request('/bikes', {method:'PUT', body:JSON.stringify({bikes:next, revision})}); revision=result.revision; bikes=next; return true; }
+    const sessionToken = token;
+    try { const result = await request('/bikes', {method:'PUT', body:JSON.stringify({bikes:next, revision})}); if(token!==sessionToken)return false; revision=result.revision; bikes=next; return true; }
     catch (error) { say(error.message + ' Your changes have not been saved.'); return false; }
     finally { saving=false; }
   }
@@ -128,7 +132,7 @@ function openAuth(mode) {
   authMode=mode; const signup=mode==='signup';
   $('auth-title').textContent=$('auth-submit').textContent=signup?'Sign up':'Log in';
   $('password').value=''; $('password').autocomplete=signup?'new-password':'current-password';
-  $('auth-help').textContent=signup?'At least 8 characters. No required capitals, numbers or symbols. Usernames are case-insensitive. No password recovery is available, so keep your password safe.':'Use your username and password.';
+  $('auth-help').textContent=signup?'At least 8 characters. No required capitals, numbers or symbols. Usernames are case-insensitive. No password recovery is available, so keep your password safe.':'Use your username and password. This browser will remember your login.';
   $('auth-error').textContent=''; $('auth-dialog').showModal();
 }
 $('login').onclick=()=>openAuth('login'); $('signup').onclick=()=>openAuth('signup');
@@ -143,32 +147,48 @@ $('auth-form').onsubmit=async e=>{
     try {
       const doc=await request('/bikes',{},result.token),next=validate(doc.bikes);
       token=result.token;account=doc.user;revision=doc.revision;bikes=next;
-      try{sessionStorage.setItem('bike-session',token);}catch{}
-      $('auth-dialog').close();accountUI();choose(bikes[0]?.id||null);say('Logged in. You are viewing your cloud bikes.');
+      let remembered=true;try{localStorage.setItem('bike-session',token);sessionStorage.removeItem('bike-session');}catch{remembered=false;}
+      $('auth-dialog').close();accountUI();choose(bikes[0]?.id||null);say('Logged in. You are viewing your cloud bikes.'+(remembered?' You will stay logged in on this device.':' Your browser blocked login storage; this login will last only while the page stays open.'));
     }catch(error){await request('/logout',{method:'POST'},result.token).catch(()=>{});throw error;}
   }catch(error){$('auth-error').textContent=error.message;}
   finally{restoring=false;$('auth-submit').disabled=false;$('auth-cancel').disabled=false;$('password').value='';}
 };
 $('auth-dialog').addEventListener('cancel',e=>{if(restoring)e.preventDefault();});
-function localMode(){token='';account=null;revision=0;try{sessionStorage.removeItem('bike-session');}catch{}try{bikes=validate(JSON.parse(localStorage.getItem(KEY)||'[]'));}catch{bikes=[];say('Local records could not be read.');}accountUI();choose(bikes[0]?.id||null);}
+function localMode(clearSaved=true){token='';account=null;revision=0;if(clearSaved){try{localStorage.removeItem('bike-session');sessionStorage.removeItem('bike-session');}catch{}}try{bikes=validate(JSON.parse(localStorage.getItem(KEY)||'[]'));}catch{bikes=[];say('Local records could not be read.');}accountUI();choose(bikes[0]?.id||null);}
 $('logout').onclick=async()=>{
   if(saving||restoring){say('Please wait for the current request to finish.');return;}
+  const sessionToken=token;
   restoring=true;
-  try{await request('/logout',{method:'POST'});localMode();say('Logged out. Local mode restored.');}
-  catch(error){if(error.status===401){localMode();say('Session ended. Local mode restored.');}else say('Could not log out: '+error.message+' Please try again.');}
-  finally{restoring=false;}
+  try{await request('/logout',{method:'POST'});if(token!==sessionToken)return;localMode();say('Logged out. Local mode restored.');}
+  catch(error){if(token!==sessionToken)return;if(error.status===401){localMode();say('Session ended. Local mode restored.');}else say('Could not log out: '+error.message+' Please try again.');}
+  finally{if(token===sessionToken||!token)restoring=false;}
 };
 $('refresh-cloud').onclick=async()=>{
   if(saving||restoring)return;
   if(!confirm('Reload saved cloud bikes? Unsaved form changes will be discarded.'))return;
   restoring=true;
-  try{const doc=await request('/bikes');bikes=validate(doc.bikes);revision=doc.revision;choose(bikes[0]?.id||null);say('Cloud bikes reloaded.');}
+  const sessionToken=token;
+  try{const doc=await request('/bikes');if(token!==sessionToken)return;bikes=validate(doc.bikes);revision=doc.revision;choose(bikes[0]?.id||null);say('Cloud bikes reloaded.');}
   catch(error){say(error.message);}
   finally{restoring=false;}
 };
 accountUI();
-if(token){
+async function restoreSession(){
+  if(!token)return;
+  const sessionToken=token;
   restoring=true;say('Restoring your cloud session…');
-  request('/bikes').then(doc=>{bikes=validate(doc.bikes);account=doc.user;revision=doc.revision;accountUI();choose(bikes[0]?.id||null);say('Cloud session restored.');}).catch(error=>{localMode();say('Could not restore cloud session: '+error.message+' Log in again to access cloud bikes.');}).finally(()=>{restoring=false;});
+  try{const doc=await request('/bikes');if(token!==sessionToken)return;bikes=validate(doc.bikes);account=doc.user;revision=doc.revision;accountUI();choose(bikes[0]?.id||null);say('Cloud session restored.');}
+  catch(error){if(token!==sessionToken)return;if(error.status===401){localMode();say('Your session has expired. Please log in again.');}else say('Cloud data is temporarily unavailable. Your login has been kept; reconnect or reload to try again. You are viewing local bikes.');}
+  finally{if(token===sessionToken||!token)restoring=false;}
 }
+if(token)restoreSession();
+window.addEventListener('online',()=>{if(token&&!account&&!restoring)restoreSession();});
+window.addEventListener('storage',event=>{
+  if(event.key!=='bike-session'&&event.key!==null)return;
+  let next='';try{next=localStorage.getItem('bike-session')||'';}catch{return;}
+  if(next===token)return;
+  localMode(false);token=next;restoring=false;
+  $('bike-dialog').close();$('auth-dialog').close();
+  if(token)restoreSession();else say('Logged out in another tab. Local mode restored.');
+});
 if(!isLocalFile && 'serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>say('Offline setup is unavailable. You can still use the app online.'));
