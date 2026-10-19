@@ -1,6 +1,6 @@
 # Where is my bike?
 
-A mobile-friendly, British English parking notebook for multiple bicycles. Static HTML, CSS and JavaScript; no build step or account required.
+A mobile-friendly, British English parking notebook for multiple bicycles. Static HTML, CSS and JavaScript; no build step required. Optional cloud accounts use Cloudflare Workers + D1.
 
 ## Run locally
 
@@ -14,20 +14,26 @@ Export and import private JSON backups to transfer data manually between devices
 
 ## GitHub Pages
 
-Create a GitHub repository and push these source files to its `main` branch. Under **Settings → Pages → Build and deployment**, choose **GitHub Actions**. The included workflow stages only public assets. All asset paths and service worker scope are relative, so repository subpaths work. No GitHub repository or live deployment has been created by this initial implementation.
+Create a GitHub repository and push these source files to its `main` branch. Under **Settings → Pages → Build and deployment**, choose **GitHub Actions**. The included workflow stages only public assets. All asset paths and service worker scope are relative, so repository subpaths work. The live repository is https://github.com/marronyao/Where_is_my_bike and the Pages site is https://marronyao.github.io/Where_is_my_bike/.
 
 ## PWA and map limitations
 
 After the first successful visit, the service worker caches the local app shell. Browser installation support varies; use the browser’s Install/Add to Home Screen option where available. Leaflet, fonts, tiles and navigation need a network connection; manual coordinate entry and existing records remain available offline. The app falls back to system fonts. No offline map downloads or tile prefetching are performed. Standard browser HTTP caching handles tiles. Keep OpenStreetMap attribution visible and review https://operations.osmfoundation.org/policies/tiles/ before increasing usage. Leaflet 1.9.4 is loaded from unpkg; map providers and CDN services receive normal network request metadata. Map tiles reveal viewed areas, and external directions reveal the destination.
-
-## Optional cloud synchronisation plan
-
-Cloud sync is not enabled in this version. Use Supabase Auth and a separate bikes table with a UUID primary key, `user_id` referencing auth.users, bike metadata, nullable coordinates, parking timestamp, note and update timestamp. Enable RLS before exposing the API. Every select/insert/update/delete policy must require `auth.uid() = user_id`; updates need both USING and WITH CHECK. Validate ranges, lengths and paired nullable coordinates with database constraints. Test with two different users plus an unauthenticated client before release.
-
-Only the public project URL and publishable/anon key may appear in browser configuration; never include a service-role key. Offer explicit sign-in and sync opt-in, an explained local-to-cloud migration, deletion/export, sign-out that clears user-specific cached records, and visible sync/conflict errors. Keep local and per-account data separate. Use update versions or optimistic concurrency to prevent silent overwrites. Do not cache authenticated API responses in the service worker. Choose a suitable region and review the provider’s current free-tier limits and privacy terms before enabling. This static local release makes no automatic cloud requests.
 
 ## Direct file preview and map access
 
 Do not double-click index.html for normal use. A file:// page cannot provide the website HTTP Referer required by the standard OpenStreetMap tile service, which may return a 403 access-blocked image. File preview now pauses tile requests and explains how to start the local server. Run `node server.mjs`, then open http://127.0.0.1:4173. GitHub Pages HTTPS also provides a website origin. Browser privacy tools that strip referrers or network restrictions may still prevent tile access.
 
 Before switching from file:// to localhost or Pages, export any existing bike records and import the backup at the new address: each origin has separate storage. The interface uses a dark night-ride palette; only the tile image layer is colour-adjusted, leaving markers and attribution readable.
+
+## Cloud accounts
+
+Sign up with a username and a password of at least 8 Unicode characters. There are no character-composition requirements. Usernames are trimmed, case-insensitive and limited to 80 characters. Passwords are not trimmed. There is currently no password reset/recovery, so keep your password safe.
+
+The Workers API stores salted PBKDF2-SHA256 password hashes (100,000 iterations, compatible with Workers Web Crypto), hashes opaque 256-bit session tokens before storage, expires sessions after seven days, revokes the current session on logout, rate-limits authentication by IP and username, and validates all incoming bike records. Browser session tokens use sessionStorage; cloud bike records stay in memory, rather than localStorage. The service worker caches public shell files only. The browser has no Cloudflare API token or database credentials.
+
+Cloud records belong to the authenticated user. Updates use a revision check; a stale device must reload cloud data rather than silently overwrite newer data. Offline cloud edits are not queued: failed saves leave the saved state unchanged and display an error. Local mode is separate and remains usable without login. Export local data before logging in, then explicitly import into the cloud account if desired. Import replaces the account document after confirmation and uploads exact coordinates.
+
+Backend source: backend/worker.mjs; schema: backend/schema.sql; deployment config: backend/wrangler.jsonc. The database/account IDs in configuration are identifiers, not credentials. Run wrangler d1 execute where-is-my-bike --remote --file backend/schema.sql --config backend/wrangler.jsonc followed by wrangler deploy --config backend/wrangler.jsonc after signing in to the appropriate Cloudflare account. config.js contains only the public API endpoint. The API allows the Pages origin https://marronyao.github.io; local preview can use guest mode, or a separate development backend with a localhost allowed origin.
+
+Tests: node tests/frontend.mjs checks account transitions and failure handling. node tests/cloud-smoke.mjs tests the deployed API with disposable accounts; it writes their IDs to ignored private/test-users.json for cleanup. Never commit private/ or backups.
