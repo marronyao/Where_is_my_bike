@@ -1,0 +1,8 @@
+{
+  "name": "where-is-my-bike-api",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-01",
+  "account_id": "70258812dd2128d67a4020c6b1a193f1",
+  "vars": { "ALLOWED_ORIGIN": "https://marronyao.github.io" },
+  "d1_databases": [{ "binding": "DB", "database_name": "where-is-my-bike", "database_id": "52a11641-8dcf-4525-be52-772cccc96661" }]
+}
